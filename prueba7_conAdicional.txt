@@ -1,0 +1,129 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+use IEEE.NUMERIC_STD.ALL;
+
+
+entity bin_bcd is
+    PORT(
+        num_bin: in  STD_LOGIC_VECTOR(12 downto 0); --entrada: numero binario de 13 bits
+        seg:     out STD_LOGIC_VECTOR(6 downto 0); --salida: segmentos del display 7seg
+        an:      out STD_LOGIC_VECTOR(3 downto 0);--salida: anodo de los display
+        clk:     in  STD_LOGIC;--entrada: señal de reloj
+        conversion: in STD_LOGIC;--entrada: plusador para inciar conversion
+        freeze: in STD_LOGIC;-- entrada: interruptor para congelar la conversion 
+        test: in STD_LOGIC;--entrada: interruptor para modo de prueba, enciende 8888
+        reset: in STD_LOGIC;--entrada:pulsador de reset
+        max: in STD_LOGIC--entrada:interruptor para mostrar el maximo valor
+    );
+end bin_bcd;
+
+architecture Behavioral of bin_bcd is
+    signal k0_bcd, k1_bcd, k2_bcd, k3_bcd: std_logic_vector(3 downto 0); --señales para los digitos BCD
+    signal max_k0_bcd, max_k1_bcd, max_k2_bcd, max_k3_bcd: std_logic_vector(3 downto 0);-- Señales para los dígitos BCD máximos
+    signal count: integer range 0 to 3 := 0; -- Contador para el multiplexado de los dígitos
+    signal seg_temp: STD_LOGIC_VECTOR(6 downto 0);  -- Señal temporal para los segmentos del display
+begin
+    proceso_bcd: process(clk, conversion, reset)--proceso principal
+        variable z: STD_LOGIC_VECTOR(27 downto 0); -- variable temporal para la conversión BCD
+    begin
+        if rising_edge(clk) then -- Detecta el flanco ascendente del reloj
+            if reset = '1' then --si se presiona el boton reset
+                -- se reinician todos los datos 
+                z := (others => '0');
+                k0_bcd <= (others => '0');
+                k1_bcd <= (others => '0');
+                k2_bcd <= (others => '0');
+                k3_bcd <= (others => '0');
+                max_k0_bcd <= (others => '0');
+                max_k1_bcd <= (others => '0');
+                max_k2_bcd <= (others => '0');
+                max_k3_bcd <= (others => '0');
+            elsif conversion = '0' and freeze = '0' then --si se inicia una nueva conversion y no esta congelada
+                -- Inicialización de datos en cero.
+                z := (others => '0');
+                -- Se realizan los primeros tres corrimientos.
+                z(14 downto 2) := num_bin;
+                for i in 0 to 8 loop
+                    -- Unidades (4 bits).
+                    if z(16 downto 13) > 4 then
+                        z(16 downto 13) := z(16 downto 13) + 3;
+                    end if;
+                    -- Decenas (4 bits).
+                    if z(20 downto 17) > 4 then
+                        z(20 downto 17) := z(20 downto 17) + 3;
+                    end if;
+                    -- Centenas (4 bits).
+                    if z(24 downto 21) > 4 then
+                        z(24 downto 21) := z(24 downto 21) + 3;
+                    end if;
+                    -- Miles (4 bits).
+                    if z(27 downto 24) > 4 then
+                        z(27 downto 24) := z(27 downto 24) + 3;
+                    end if;
+                    -- Corrimiento a la izquierda.
+                    z(27 downto 1) := z(26 downto 0);
+                end loop;
+                -- Pasa datos de variable Z, correspondiente a BCD.
+                k0_bcd<=z(16 downto 13);
+                k1_bcd<=z(20 downto 17);
+                k2_bcd<=z(24 downto 21);
+                k3_bcd<=z(27 downto 24);
+
+                -- actualiza el maximo valor.
+                if unsigned(k3_bcd & k2_bcd & k1_bcd & k0_bcd) > unsigned(max_k3_bcd & max_k2_bcd & max_k1_bcd & max_k0_bcd) then
+                    max_k3_bcd <= k3_bcd;
+                    max_k2_bcd <= k2_bcd;
+                    max_k1_bcd <= k1_bcd;
+                    max_k0_bcd <= k0_bcd;
+                end if;
+
+            end if;
+        end if;
+    end process;
+
+    process(clk) 
+    begin
+        if rising_edge(clk) then -- Detecta el flanco ascendente del reloj
+            count <= count +1; --controla cual de los digitos del display va a encender
+            if count =4 then --cada vez que cout llega a 4 cambia al siguiente digito en el proceso(multiplexado)
+                count <=0;
+            end if;
+
+            case count is
+                when others => 
+                    null; --en algun otro caso no se realiza ninguna accion 
+            end case;
+
+            seg <= seg_temp; --se determinan los segmentos que se van a activar en los display
+
+            -- Test mode.
+            if test = '1' then --si se activa el modo test se muestra un 8888
+                seg <= "0000111";
+                an <= "0000"; 
+            end if;
+
+            -- Max modo.
+            if max = '1' then --si el interruptor de maximo esta activado 
+                case count is -- Utiliza el contador "count" para determinar qué dígito mostrar
+                    when 0 =>
+                        seg_temp <= "000" & std_logic_vector(max_k0_bcd);  
+                        an <= "1110";
+                    when 1 =>
+                        seg_temp <= "000" & std_logic_vector(max_k1_bcd); 
+                        an <= "1101";
+                    when 2 =>
+                        seg_temp <= "000" & std_logic_vector(max_k2_bcd); 
+                        an <= "1011";
+                    when 3 =>
+                        seg_temp <= "000" & std_logic_vector(max_k3_bcd); 
+                        an <= "0111";
+                    when others =>
+                        null; 
+                end case;
+            end if;
+
+        end if;
+    end process;
+
+end Behavioral;
